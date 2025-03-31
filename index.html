@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>一个小游戏</title>
+    <style>
+        /* 保持所有样式不变 */
+        canvas {
+            border: 2px solid #2ecc71;
+            border-radius: 8px;
+            box-shadow: 0 0 40px rgba(46, 204, 113, 0.3);
+            max-width: 70vw;
+            z-index: 1;
+            display: none;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        .menu {
+            position: absolute;
+            z-index: 2;
+            background: rgba(0, 0, 0, 0.95);
+            padding: 25px 40px;
+            border-radius: 15px;
+            border: 1px solid #2ecc71;
+            box-shadow: 0 0 30px rgba(46, 204, 113, 0.3);
+            text-align: center;
+            color: white;
+            width: 300px;
+        }
+        .menu-btn {
+            margin: 8px;
+            padding: 12px 24px;
+            cursor: pointer;
+            background: #34495e;
+            border: none;
+            color: white;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: all 0.2s;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .menu-btn:hover {
+            background: #2ecc71;
+            transform: scale(1.05);
+        }
+        #leaderboardList {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+            padding: 0;
+            list-style: none;
+        }
+        .game-over {
+            position: absolute;
+            z-index: 3;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            color: white;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 主菜单 -->
+    <div id="mainMenu" class="menu">
+        <h2>🚀 一个小游戏</h2>
+        <p class="game-rules">请使用电脑方向键进行操作哦</p>  <!-- 新增规则提示 -->
+        <button class="menu-btn" onclick="showMenu('difficulty')">🎮 开始游戏</button>
+        <button class="menu-btn" onclick="showLeaderboard()">🏆 排行榜</button>
+        <button class="menu-btn" id="musicBtn">🎵 音乐: 开启</button>
+        <button class="menu-btn" onclick="exitGame()">🚪 退出游戏</button>
+    </div>
+
+    <!-- 保持原有所有HTML结构不变 -->
+    <!-- ...（原有所有HTML内容保持不变）... -->
+
+    <!-- 排行榜 -->
+    <div id="leaderboard" class="menu" style="display:none">
+        <h2>🏅 排行榜 TOP10</h2>
+        <div id="leaderboardList"></div>
+        <button class="menu-btn" onclick="showMenu('main')">🔙 返回主菜单</button>
+    </div>
+
+    <!-- 难度选择 -->
+    <div id="difficulty" class="menu" style="display:none">
+        <h2>⚙️ 选择难度</h2>
+        <button class="menu-btn" style="background: #2ecc71" onclick="startGame('easy')">😊 简单模式</button>
+        <button class="menu-btn" style="background: #e74c3c" onclick="startGame('hard')">😡 困难模式</button>
+        <button class="menu-btn" style="background: #e67e22" onclick="startGame('insane')">🤯 疯狂模式</button>
+        <button class="menu-btn" onclick="showMenu('main')">🔙 返回主菜单</button>
+    </div>
+
+    <!-- 游戏结束界面 -->
+    <div id="gameOverMenu" class="game-over">
+        <h2>💥 游戏结束</h2>
+        <p id="finalScore">🏅 得分：0</p>
+        <button class="menu-btn" onclick="retryGame()">🔄 再试一次</button>
+        <button class="menu-btn" onclick="showMenu('main')">🏠 返回主菜单</button>
+    </div>
+
+    <canvas id="gameCanvas" width="504" height="896"></canvas>
+    <audio id="bgMusic" loop>
+        <source src="https://cdn.pixabay.com/audio/2023/10/23/audio_3d40f7d9a8.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        // 存储系统
+        const storage = {
+            get(key) {
+                return JSON.parse(localStorage.getItem(key)) || [];
+            },
+            set(key, value) {
+                localStorage.setItem(key, JSON.stringify(value));
+            }
+        };
+
+        // 游戏配置
+        let config = {
+            currentDifficulty: 'easy',
+            music: true,
+            scores: storage.get('scores') || [],
+            obstacleCounter: 0
+        };
+
+        // 难度配置
+        const difficulties = {
+            easy: {
+                name: '简单',
+                playerSpeed: 450,
+                spawnInterval: 1.0,
+                obstacleSpeed: 600,
+                color: '#2ecc71',
+                scoreValue: 1
+            },
+            hard: {
+                name: '困难',
+                playerSpeed: 500,
+                spawnInterval: 0.6,
+                obstacleSpeed: 900,
+                color: '#e74c3c',
+                scoreValue: 2
+            },
+            insane: {
+                name: '疯狂',
+                playerSpeed: 550,
+                spawnInterval: 0.3,
+                obstacleSpeed: 1200,
+                color: '#e67e22',
+                scoreValue: 3
+            }
+        };
+
+        // 游戏核心对象
+        const game = {
+            canvas: document.getElementById('gameCanvas'),
+            ctx: null,
+            player: null,
+            obstacles: [],
+            score: 0,
+            keys: {},
+            isRunning: false,
+            effects: null,
+            lastTime: 0,
+            accumulatedTime: 0,
+            keyHandler: null,
+
+            init() {
+                this.canvas.style.display = 'block'; // 确保显示画布
+                this.ctx = this.canvas.getContext('2d');
+                this.resetState();
+                
+                // 修复点：确保只绑定一次事件监听
+                if (!this.keyHandler) {
+                    this.keyHandler = this.handleKey.bind(this);
+                    window.addEventListener('keydown', this.keyHandler);
+                    window.addEventListener('keyup', this.keyHandler);
+                }
+
+                this.isRunning = true;
+                this.lastTime = performance.now();
+                requestAnimationFrame((t) => this.gameLoop(t));
+            },
+
+            resetState() {
+                config.obstacleCounter = 0;
+                this.player = {
+                    x: 226,
+                    y: 738,
+                    size: 53,
+                    glow: 0,
+                    update(deltaTime) {
+                        this.glow = (this.glow + deltaTime * 3) % (Math.PI * 2);
+                    }
+                };
+                this.obstacles = [];
+                this.score = 0;
+                this.keys = {};
+                this.accumulatedTime = 0;
+                this.effects = new GameEffects();
+            },
+
+            handleKey(e) {
+                const validKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+                if (validKeys.includes(e.key)) {
+                    this.keys[e.key] = e.type === 'keydown';
+                    e.preventDefault();
+                }
+            },
+
+            gameLoop(timestamp) {
+                if (!this.isRunning) return;
+
+                const deltaTime = (timestamp - this.lastTime) / 1000;
+                this.lastTime = timestamp;
+
+                this.update(deltaTime);
+                this.render(deltaTime);
+                requestAnimationFrame((t) => this.gameLoop(t));
+            },
+
+            update(deltaTime) {
+                // 玩家移动
+                let dx = (this.keys.ArrowRight ? 1 : 0) - (this.keys.ArrowLeft ? 1 : 0);
+                let dy = (this.keys.ArrowDown ? 1 : 0) - (this.keys.ArrowUp ? 1 : 0);
+                
+                if (dx !== 0 && dy !== 0) {
+                    dx *= 0.707;
+                    dy *= 0.707;
+                }
+                
+                const difficulty = difficulties[config.currentDifficulty];
+                this.player.x += dx * difficulty.playerSpeed * deltaTime;
+                this.player.y += dy * difficulty.playerSpeed * deltaTime;
+                this.player.x = Math.max(0, Math.min(504 - 53, this.player.x));
+                this.player.y = Math.max(0, Math.min(896 - 53, this.player.y));
+
+                // 生成障碍物
+                this.accumulatedTime += deltaTime;
+                if (this.accumulatedTime > difficulty.spawnInterval) {
+                    config.obstacleCounter++;
+                    const isSpecialPosition = [2, 3, 5].includes(config.obstacleCounter % 5);
+                    
+                    const newObstacle = {
+                        x: isSpecialPosition ? this.player.x : Math.random() * (504 - 63),
+                        y: -63,
+                        size: 63,
+                        speed: difficulty.obstacleSpeed,
+                        rotation: Math.random() * Math.PI * 2,
+                        rotationSpeed: (Math.random() - 0.5) * 4
+                    };
+                    this.obstacles.push(newObstacle);
+                    this.accumulatedTime = 0;
+                }
+
+                // 更新障碍物
+                this.obstacles.forEach((obs, index) => {
+                    obs.y += obs.speed * deltaTime;
+                    obs.rotation += obs.rotationSpeed * deltaTime;
+
+                    if (this.checkCollision(obs)) {
+                        this.effects.createExplosion(obs.x + 31.5, obs.y + 31.5);
+                        this.effects.screenFlash = 1;
+                        this.gameOver();
+                        return;
+                    }
+
+                    if (obs.y > 896) {
+                        this.obstacles.splice(index, 1);
+                        this.score += difficulty.scoreValue;
+                    }
+                });
+
+                this.effects.update(deltaTime);
+                this.player.update(deltaTime);
+            },
+
+            render(deltaTime) {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, 504, 896);
+
+                // 绘制星空
+                this.effects.stars.forEach(star => {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // 绘制障碍物
+                const difficulty = difficulties[config.currentDifficulty];
+                this.obstacles.forEach(obs => {
+                    ctx.save();
+                    ctx.translate(obs.x + 31.5, obs.y + 31.5);
+                    ctx.rotate(obs.rotation);
+                    ctx.fillStyle = difficulty.color;
+                    ctx.fillRect(-31.5, -31.5, 63, 63);
+                    ctx.restore();
+                });
+
+                // 绘制玩家
+                const glowSize = Math.sin(this.player.glow) * 15 + 30;
+                const gradient = ctx.createRadialGradient(
+                    this.player.x + 26.5, 
+                    this.player.y + 26.5, 
+                    0,
+                    this.player.x + 26.5,
+                    this.player.y + 26.5,
+                    glowSize
+                );
+                gradient.addColorStop(0, 'rgba(52, 152, 219, 0.8)');
+                gradient.addColorStop(1, 'rgba(52, 152, 219, 0)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(this.player.x - 30, this.player.y - 30, 113, 113);
+
+                ctx.fillStyle = '#3498db';
+                ctx.beginPath();
+                ctx.roundRect(this.player.x, this.player.y, 53, 53, 8);
+                ctx.fill();
+
+                // 绘制特效
+                this.effects.explosions.forEach(e => {
+                    ctx.fillStyle = e.color;
+                    ctx.globalAlpha = e.life;
+                    ctx.beginPath();
+                    ctx.arc(e.x, e.y, e.size * (e.life/0.8), 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.globalAlpha = 1;
+
+                if (this.effects.screenFlash > 0) {
+                    ctx.fillStyle = `rgba(255, 0, 0, ${this.effects.screenFlash})`;
+                    ctx.fillRect(0, 0, 504, 896);
+                }
+
+                ctx.fillStyle = '#fff';
+                ctx.font = '20px Arial';
+                ctx.fillText(`得分: ${this.score}`, 20, 30);
+            },
+
+            checkCollision(obstacle) {
+                return this.player.x < obstacle.x + obstacle.size &&
+                       this.player.x + 53 > obstacle.x &&
+                       this.player.y < obstacle.y + obstacle.size &&
+                       this.player.y + 53 > obstacle.y;
+            },
+
+            gameOver() {
+                this.isRunning = false;
+                window.removeEventListener('keydown', this.keyHandler);
+                window.removeEventListener('keyup', this.keyHandler);
+                this.keyHandler = null; // 清除事件监听引用
+                
+                this.canvas.style.display = 'none';
+                document.getElementById('gameOverMenu').style.display = 'block';
+                document.getElementById('finalScore').textContent = `🏅 得分：${this.score}`;
+
+                config.scores.push({
+                    score: this.score,
+                    difficulty: config.currentDifficulty,
+                    date: new Date().toLocaleString()
+                });
+                storage.set('scores', config.scores);
+            }
+        };
+
+        // 特效系统
+        class GameEffects {
+            constructor() {
+                this.stars = Array.from({length: 200}, () => ({
+                    x: Math.random() * 504,
+                    y: Math.random() * 896,
+                    size: Math.random() * 2,
+                    speed: Math.random() * 0.3 + 0.1,
+                    alpha: Math.random() * 0.3 + 0.2
+                }));
+                this.explosions = [];
+                this.screenFlash = 0;
+            }
+
+            update(deltaTime) {
+                this.stars.forEach(star => star.y += star.speed);
+                this.stars = this.stars.filter(star => {
+                    if (star.y > 896) star.y = -10;
+                    return true;
+                });
+
+                this.explosions = this.explosions.filter(e => {
+                    e.life -= deltaTime;
+                    e.x += e.vx * deltaTime;
+                    e.y += e.vy * deltaTime;
+                    return e.life > 0;
+                });
+
+                this.screenFlash = Math.max(0, this.screenFlash - deltaTime * 2);
+            }
+
+            createExplosion(x, y) {
+                for(let i = 0; i < 30; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 150 + 50;
+                    this.explosions.push({
+                        x, y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        size: Math.random() * 4 + 2,
+                        life: 0.8,
+                        color: `hsl(${Math.random()*360}, 100%, 60%)`
+                    });
+                }
+            }
+        }
+
+        // 游戏控制
+        function startGame(difficulty) {
+            config.currentDifficulty = difficulty;
+            document.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
+            document.getElementById('gameOverMenu').style.display = 'none';
+            game.init(); // 确保调用初始化
+        }
+
+        function retryGame() {
+            document.getElementById('gameOverMenu').style.display = 'none';
+            game.init();
+        }
+
+        function exitGame() {
+            if (confirm("确定要退出游戏吗？")) {
+                window.close();
+            }
+        }
+
+        // 菜单控制
+        function showMenu(menuId) {
+            document.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
+            document.getElementById('gameOverMenu').style.display = 'none';
+            
+            switch(menuId) {
+                case 'main':
+                    document.getElementById('mainMenu').style.display = 'block';
+                    break;
+                case 'leaderboard':
+                    document.getElementById('leaderboard').style.display = 'block';
+                    break;
+                case 'difficulty':
+                    document.getElementById('difficulty').style.display = 'block';
+                    break;
+                default:
+                    console.warn('未知菜单:', menuId);
+            }
+        }
+
+        // 音乐控制
+        const bgMusic = document.getElementById('bgMusic');
+        document.getElementById('musicBtn').addEventListener('click', () => {
+            config.music = !config.music;
+            document.getElementById('musicBtn').textContent = `🎵 音乐: ${config.music ? '开启' : '关闭'}`;
+            config.music ? bgMusic.play() : bgMusic.pause();
+            storage.set('music', config.music);
+        });
+
+        // 排行榜系统
+        function showLeaderboard() {
+            const list = document.getElementById('leaderboardList');
+            list.innerHTML = config.scores
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10)
+                .map((s, i) => `
+                    <li style="margin: 8px 0; padding: 8px; background: #2c3e50; border-radius: 4px">
+                        <span style="font-size: 1.1em">${i+1}. 🏅 ${s.score}</span>
+                        <div style="font-size: 0.9em">
+                            <span>🎚️ ${difficulties[s.difficulty].name}</span><br>
+                            <span>📅 ${s.date}</span>
+                        </div>
+                    </li>
+                `).join('');
+            showMenu('leaderboard');
+        }
+
+        // 初始化
+        if (config.music) bgMusic.play().catch(() => {});
+        showMenu('main');
+    </script>
+</body>
+</html>
